@@ -61,12 +61,12 @@ func runPull(imageType string, args []string) {
 
 	case "vm":
 		fs := flag.NewFlagSet("pull vm", flag.ExitOnError)
-		registry := fs.String("registry", "", "VM image registry hostname (required)")
+		registry := fs.String("registry", "", "VM image registry hostname (optional for well-known images)")
 		dir := fs.String("dir", "", "root directory for image data (optional)")
 		fs.Parse(args)
 
-		if fs.NArg() < 1 || *registry == "" {
-			fmt.Fprintln(os.Stderr, "usage: image-cli pull vm <image> --registry <host> [--dir <path>]")
+		if fs.NArg() < 1 {
+			fmt.Fprintln(os.Stderr, "usage: image-cli pull vm <image> [--registry <host>] [--dir <path>]")
 			os.Exit(1)
 		}
 
@@ -117,12 +117,12 @@ func runInfo(imageType string, args []string) {
 
 	case "vm":
 		fs := flag.NewFlagSet("info vm", flag.ExitOnError)
-		registry := fs.String("registry", "", "VM image registry hostname (required)")
+		registry := fs.String("registry", "", "VM image registry hostname (optional for well-known images)")
 		dir := fs.String("dir", "", "root directory for image data (optional)")
 		fs.Parse(args)
 
-		if fs.NArg() < 1 || *registry == "" {
-			fmt.Fprintln(os.Stderr, "usage: image-cli info vm <image> --registry <host> [--dir <path>]")
+		if fs.NArg() < 1 {
+			fmt.Fprintln(os.Stderr, "usage: image-cli info vm <image> [--registry <host>] [--dir <path>]")
 			os.Exit(1)
 		}
 
@@ -276,9 +276,9 @@ func stringContains(s, sub string) bool {
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
   image-cli pull container <image> [--dir <path>]
-  image-cli pull vm        <image> --registry <host> [--dir <path>]
+  image-cli pull vm        <image> [--registry <host>] [--dir <path>]
   image-cli info container <image> [--dir <path>]
-  image-cli info vm        <image> --registry <host> [--dir <path>]
+  image-cli info vm        <image> [--registry <host>] [--dir <path>]
   image-cli ls             [--dir <path>]
   image-cli rm             <image> [--dir <path>]`)
 	os.Exit(1)

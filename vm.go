@@ -6,6 +6,20 @@ import (
 )
 
 func pullVM(ref VMRef) (*VMImage, error) {
+	// Resolve a default registry when the caller omitted one.
+	if ref.Registry == "" {
+		name, _, err := parseVMRef(ref.Image)
+		if err != nil {
+			return nil, fmt.Errorf("compute-image: parse ref: %w", err)
+		}
+		reg, err := defaultVMRegistry(name)
+		if err != nil {
+			return nil, fmt.Errorf("compute-image: %w", err)
+		}
+		ref.Registry = reg
+		logf("[*] Using default registry: %s", ref.Registry)
+	}
+
 	paths, err := resolveVMPaths(ref)
 	if err != nil {
 		return nil, fmt.Errorf("compute-image: resolve paths: %w", err)

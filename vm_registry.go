@@ -45,6 +45,20 @@ func parseVMRef(image string) (name, version string, err error) {
 	return parts[0], parts[1], nil
 }
 
+// defaultVMRegistry returns a well-known registry for common VM image names.
+// Returns an error if the name is not recognized, so the caller can ask the
+// user to supply --registry explicitly.
+func defaultVMRegistry(name string) (string, error) {
+	switch name {
+	case "ubuntu":
+		return "cloud-images.ubuntu.com", nil
+	case "debian":
+		return "cloud.debian.org", nil
+	default:
+		return "", fmt.Errorf("no default registry for %q — supply --registry", name)
+	}
+}
+
 // buildVMImageURL constructs the download URL for a well-known VM image.
 // Extend this as more registries/distros are supported.
 func buildVMImageURL(registry, name, version string) string {
