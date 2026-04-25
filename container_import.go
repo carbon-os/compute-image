@@ -25,14 +25,13 @@ func importLayers(ctx context.Context, tarPaths []string, baseDir, scratchDir st
 	for _, d := range []string{baseDir, scratchDir} {
 		if _, err := os.Stat(d); err == nil {
 			logf("[*] Cleaning: %s", d)
-			prepareRemove(d) // destroy HCS layer locks + strip read-only/system attributes
+			prepareRemove(d)
 			if err := os.RemoveAll(d); err != nil {
 				return "", fmt.Errorf("compute-image: clean %s: %w", d, err)
 			}
 		}
 	}
 
-	// Both baseDir and scratchDir must exist on disk before any HCS calls.
 	for _, d := range []string{baseDir, scratchDir} {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			return "", fmt.Errorf("compute-image: create dir %s: %w", d, err)
@@ -43,7 +42,6 @@ func importLayers(ctx context.Context, tarPaths []string, baseDir, scratchDir st
 
 	var layerDirs []string // accumulated parent chain, oldest-first
 	for i, tarPath := range tarPaths {
-		// Each layer gets its own subdirectory: base/00, base/01, …
 		layerDir := filepath.Join(baseDir, fmt.Sprintf("%02d", i))
 		if err := os.MkdirAll(layerDir, 0755); err != nil {
 			return "", fmt.Errorf("compute-image: create layer dir: %w", err)
@@ -56,27 +54,50 @@ func importLayers(ctx context.Context, tarPaths []string, baseDir, scratchDir st
 		if err := importOneTar(ctx, tarPath, layerDir, parentChain); err != nil {
 			return "", fmt.Errorf("compute-image: import %s: %w", filepath.Base(tarPath), err)
 		}
+
+		// If this layer contains a UtilityVM directory, post-process it into
+		// the SystemTemplateBase.vhdx that HCS needs for Hyper-V isolation.
+		// ociwclayer extracts the raw Files\ tree but leaves the vhdx as a
+		// stub — ProcessUtilityVMImage stamps it into the real UVM image.
+		uvmDir := filepath.Join(layerDir, "UtilityVM")
+		if _, err := os.Stat(uvmDir); err == nil {
+			logf("       [*] Processing UtilityVM image (Hyper-V isolation support)...")
+
+			// ProcessUtilityVMImage fails with "The file exists" if the vhdx
+			// stubs from a previous partial import are still present.
+			// Delete them before processing so it can write fresh ones.
+			for _, vhdx := range []string{
+				filepath.Join(uvmDir, "SystemTemplate.vhdx"),
+				filepath.Join(uvmDir, "SystemTemplateBase.vhdx"),
+			} {
+				if err := os.Remove(vhdx); err != nil && !os.IsNotExist(err) {
+					return "", fmt.Errorf("compute-image: remove stale vhdx %s: %w", vhdx, err)
+				}
+			}
+
+			if err := hcsshim.ProcessUtilityVMImage(uvmDir); err != nil {
+				return "", fmt.Errorf("compute-image: ProcessUtilityVMImage for layer %02d: %w", i, err)
+			}
+			logf("       [+] UtilityVM image ready.")
+		}
+
 		layerDirs = append(layerDirs, layerDir)
 	}
 
 	topLayer := layerDirs[len(layerDirs)-1]
 	logf("[+] Base layers imported. Top layer: %s", topLayer)
 
-	// Reverse the completed layerDirs chain for the scratch layer creation
 	parentChain := reversePaths(layerDirs)
 
-	// Create the writable scratch layer on top of the full parent chain.
 	logf("[*] Creating scratch layer: %s", scratchDir)
 	di := hcsshim.DriverInfo{
-		HomeDir: filepath.Dir(scratchDir), // parent of scratch, not parent of top layer
-		Flavour: 1,                        // windowsfilter
+		HomeDir: filepath.Dir(scratchDir),
+		Flavour: 1,
 	}
 	if err := hcsshim.CreateSandboxLayer(di, filepath.Base(scratchDir), topLayer, parentChain); err != nil {
 		return "", fmt.Errorf("compute-image: create scratch: %w", err)
 	}
 
-	// Write layerchain.json (full chain, not just the top layer) using the reversed chain
-	// so HCS can reconstruct the stack when the scratch is later activated.
 	chain, _ := json.Marshal(parentChain)
 	lcPath := filepath.Join(scratchDir, "layerchain.json")
 	if err := os.WriteFile(lcPath, chain, 0644); err != nil {
