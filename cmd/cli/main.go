@@ -1,9 +1,12 @@
+//go:build windows
+
 package main
 
 import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	compute_image "github.com/carbon-os/compute-image"
 )
@@ -209,33 +212,31 @@ func runRm(args []string) {
 		os.Exit(1)
 	}
 
-	paths, _ := compute_image.ResolveContainerPaths(compute_image.ContainerRef{Dir: *dir})
-	ref := fs.Arg(0)
-	entries, err := os.ReadDir(paths.Cache)
-	if err != nil {
-		fatal(fmt.Errorf("cache not found: %s", paths.Cache))
+	image := fs.Arg(0)
+
+	// Remove the image directory (destroys HCS layers, then deletes).
+	if err := compute_image.Remove(compute_image.ContainerRef{Image: image, Dir: *dir}); err != nil {
+		fatal(err)
 	}
 
-	removed := 0
+	// Remove any matching cached layer tarballs.
+	paths, _ := compute_image.ResolveContainerPaths(compute_image.ContainerRef{Dir: *dir})
+	entries, err := os.ReadDir(paths.Cache)
+	if err != nil {
+		return // no cache dir — nothing left to do
+	}
 	for _, e := range entries {
-		if matchesRef(e.Name(), ref) {
-			p := paths.Cache + string(os.PathSeparator) + e.Name()
+		if matchesRef(e.Name(), image) {
+			p := filepath.Join(paths.Cache, e.Name())
 			if err := os.Remove(p); err != nil {
-				fmt.Fprintf(os.Stderr, "rm %s: %v\n", e.Name(), err)
+				fmt.Fprintf(os.Stderr, "rm cache %s: %v\n", e.Name(), err)
 			} else {
-				fmt.Printf("removed: %s\n", e.Name())
-				removed++
+				fmt.Printf("removed cache: %s\n", e.Name())
 			}
 		}
 	}
-	if removed == 0 {
-		fmt.Printf("no cached files matched %q\n", ref)
-	}
 }
 
-// runRmAll removes all pulled image directories under the root dir.
-// By default the download cache is preserved so re-pulling is fast.
-// Pass --cache to also remove cached layer tarballs and qcow2 files.
 func runRmAll(args []string) {
 	fs := flag.NewFlagSet("rm-all", flag.ExitOnError)
 	dir := fs.String("dir", "", "root directory for image data (optional)")
@@ -247,27 +248,15 @@ func runRmAll(args []string) {
 		if local == "" {
 			local = "."
 		}
-		rootDir = local + string(os.PathSeparator) + "carbon"
+		rootDir = filepath.Join(local, "carbon")
 	}
 
 	fmt.Printf("[*] Removing: %s\n", rootDir)
-	if err := os.RemoveAll(rootDir); err != nil {
+	if err := compute_image.RemoveAll(rootDir); err != nil {
 		fmt.Fprintf(os.Stderr, "[-] %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("[+] Done.")
-}
-
-func parentDir(path string) string {
-	for len(path) > 1 && (path[len(path)-1] == '/' || path[len(path)-1] == '\\') {
-		path = path[:len(path)-1]
-	}
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' || path[i] == '\\' {
-			return path[:i]
-		}
-	}
-	return path
 }
 
 func matchesRef(filename, ref string) bool {
@@ -314,7 +303,7 @@ func usage() {
   image-cli info vm        <image> [--registry <host>] [--dir <path>]
   image-cli ls             [--dir <path>]
   image-cli rm             <image> [--dir <path>]
-  image-cli rm-all         [--dir <path>] [--cache]`)
+  image-cli rm-all         [--dir <path>]`)
 	os.Exit(1)
 }
 

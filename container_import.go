@@ -15,53 +15,91 @@ import (
 	"github.com/Microsoft/hcsshim/pkg/ociwclayer"
 )
 
-func importLayers(ctx context.Context, tarPaths []string, baseDir, scratchDir string) error {
-	// Wipe and recreate base and scratch — always start clean
+// importLayers imports each tar into its own numbered subdirectory of baseDir
+// (e.g. base/00, base/01 …), builds the HCS parent chain as it goes, then
+// creates a writable scratch layer on top of the whole stack.
+// It returns the path of the topmost (highest-numbered) layer so the caller
+// can hand it to the container runtime.
+func importLayers(ctx context.Context, tarPaths []string, baseDir, scratchDir string) (string, error) {
+	// Always start clean.
 	for _, d := range []string{baseDir, scratchDir} {
 		if _, err := os.Stat(d); err == nil {
 			logf("[*] Cleaning: %s", d)
+			prepareRemove(d) // destroy HCS layer locks + strip read-only/system attributes
 			if err := os.RemoveAll(d); err != nil {
-				return fmt.Errorf("compute-image: clean %s: %w", d, err)
+				return "", fmt.Errorf("compute-image: clean %s: %w", d, err)
 			}
 		}
 	}
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return fmt.Errorf("compute-image: create base dir: %w", err)
-	}
 
-	// Import each layer in order
-	logf("[*] Importing %d layer(s) into: %s", len(tarPaths), baseDir)
-	for _, tarPath := range tarPaths {
-		logf("    -> %s", filepath.Base(tarPath))
-		if err := importOneTar(ctx, tarPath, baseDir); err != nil {
-			return fmt.Errorf("compute-image: import %s: %w", filepath.Base(tarPath), err)
+	// Both baseDir and scratchDir must exist on disk before any HCS calls.
+	for _, d := range []string{baseDir, scratchDir} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			return "", fmt.Errorf("compute-image: create dir %s: %w", d, err)
 		}
 	}
-	logf("[+] Base layer imported.")
 
-	// Create scratch (writable overlay)
+	logf("[*] Importing %d layer(s) into: %s", len(tarPaths), baseDir)
+
+	var layerDirs []string // accumulated parent chain, oldest-first
+	for i, tarPath := range tarPaths {
+		// Each layer gets its own subdirectory: base/00, base/01, …
+		layerDir := filepath.Join(baseDir, fmt.Sprintf("%02d", i))
+		if err := os.MkdirAll(layerDir, 0755); err != nil {
+			return "", fmt.Errorf("compute-image: create layer dir: %w", err)
+		}
+		logf("    -> [%d/%d] %s", i+1, len(tarPaths), filepath.Base(tarPath))
+
+		// hcsshim APIs expect the parent chain ordered from newest to oldest
+		parentChain := reversePaths(layerDirs)
+
+		if err := importOneTar(ctx, tarPath, layerDir, parentChain); err != nil {
+			return "", fmt.Errorf("compute-image: import %s: %w", filepath.Base(tarPath), err)
+		}
+		layerDirs = append(layerDirs, layerDir)
+	}
+
+	topLayer := layerDirs[len(layerDirs)-1]
+	logf("[+] Base layers imported. Top layer: %s", topLayer)
+
+	// Reverse the completed layerDirs chain for the scratch layer creation
+	parentChain := reversePaths(layerDirs)
+
+	// Create the writable scratch layer on top of the full parent chain.
 	logf("[*] Creating scratch layer: %s", scratchDir)
 	di := hcsshim.DriverInfo{
-		HomeDir: filepath.Dir(baseDir),
-		Flavour: 1, // windowsfilter
+		HomeDir: filepath.Dir(scratchDir), // parent of scratch, not parent of top layer
+		Flavour: 1,                        // windowsfilter
 	}
-	scratchID := filepath.Base(scratchDir)
-	if err := hcsshim.CreateSandboxLayer(di, scratchID, baseDir, []string{baseDir}); err != nil {
-		return fmt.Errorf("compute-image: create scratch: %w", err)
+	if err := hcsshim.CreateSandboxLayer(di, filepath.Base(scratchDir), topLayer, parentChain); err != nil {
+		return "", fmt.Errorf("compute-image: create scratch: %w", err)
 	}
 
-	// Write layerchain.json so HCS knows the parent chain
-	chain, _ := json.Marshal([]string{baseDir})
+	// Write layerchain.json (full chain, not just the top layer) using the reversed chain
+	// so HCS can reconstruct the stack when the scratch is later activated.
+	chain, _ := json.Marshal(parentChain)
 	lcPath := filepath.Join(scratchDir, "layerchain.json")
 	if err := os.WriteFile(lcPath, chain, 0644); err != nil {
-		return fmt.Errorf("compute-image: write layerchain.json: %w", err)
+		return "", fmt.Errorf("compute-image: write layerchain.json: %w", err)
 	}
 
 	logf("[+] Scratch layer ready.")
-	return nil
+	return topLayer, nil
 }
 
-func importOneTar(ctx context.Context, tarPath, destDir string) error {
+// reversePaths creates a new slice with paths ordered newest-to-oldest.
+func reversePaths(paths []string) []string {
+	reversed := make([]string, len(paths))
+	for i, p := range paths {
+		reversed[len(paths)-1-i] = p
+	}
+	return reversed
+}
+
+// importOneTar decompresses tarPath and imports it as an HCS layer into
+// destDir. parentDirs is the ordered list of parent layer directories
+// (newest-to-oldest).
+func importOneTar(ctx context.Context, tarPath, destDir string, parentDirs []string) error {
 	f, err := os.Open(tarPath)
 	if err != nil {
 		return err
@@ -74,13 +112,12 @@ func importOneTar(ctx context.Context, tarPath, destDir string) error {
 	}
 	defer gzr.Close()
 
-	// nil parent paths = base layer
-	_, err = ociwclayer.ImportLayerFromTar(ctx, gzr, destDir, nil)
+	_, err = ociwclayer.ImportLayerFromTar(ctx, gzr, destDir, parentDirs)
 	return err
 }
 
-// scratchLayerExists reports whether an already-prepared scratch exists and
-// its layerchain.json references the given baseDir.
+// scratchLayerExists reports whether an already-prepared scratch exists whose
+// layerchain.json contains baseDir anywhere in the chain.
 func scratchLayerExists(scratchDir, baseDir string) bool {
 	data, err := os.ReadFile(filepath.Join(scratchDir, "layerchain.json"))
 	if err != nil {
@@ -90,5 +127,10 @@ func scratchLayerExists(scratchDir, baseDir string) bool {
 	if err := json.Unmarshal(data, &chain); err != nil || len(chain) == 0 {
 		return false
 	}
-	return strings.EqualFold(chain[0], baseDir)
+	for _, entry := range chain {
+		if strings.EqualFold(entry, baseDir) {
+			return true
+		}
+	}
+	return false
 }

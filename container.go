@@ -52,18 +52,20 @@ func pullContainer(ref ContainerRef) (*ContainerImage, error) {
 		return nil, err
 	}
 
-	if err := importLayers(ctx, cachedTars, paths.Base, paths.Scratch); err != nil {
+	topLayer, err := importLayers(ctx, cachedTars, paths.Base, paths.Scratch)
+	if err != nil {
 		return nil, err
 	}
 
 	logf("[+] Container image ready.")
 	logf("    Base:    %s", paths.Base)
+	logf("    Top:     %s", topLayer)
 	logf("    Scratch: %s", paths.Scratch)
 
 	return &ContainerImage{
 		Image:     ref.Image,
 		Paths:     paths,
-		BaseLayer: paths.Base,
+		BaseLayer: topLayer,   // runtime needs the topmost layer, not the base dir
 		Scratch:   paths.Scratch,
 	}, nil
 }
