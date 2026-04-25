@@ -32,3 +32,9 @@ func resolveCache(cache string) string {
 	}
 	return filepath.Join(local, "carbon", "cache")
 }
+
+// ResolveCache is exported so image-cli can display the resolved cache path.
+func ResolveCache(cache string) string { return resolveCache(cache) }
+
+// HumanBytes is exported so image-cli can format sizes consistently.
+func HumanBytes(b int64) string { return humanBytes(b) }
