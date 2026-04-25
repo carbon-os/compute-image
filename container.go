@@ -9,12 +9,19 @@ import (
 func pullContainer(ref ContainerRef) (*ContainerImage, error) {
 	ctx := context.Background()
 
+	paths, err := resolveContainerPaths(ref)
+	if err != nil {
+		return nil, fmt.Errorf("compute-image: resolve paths: %w", err)
+	}
+
 	if err := enablePrivileges(); err != nil {
 		return nil, fmt.Errorf("compute-image: privileges: %w", err)
 	}
 
-	if err := os.MkdirAll(ref.Cache, 0755); err != nil {
-		return nil, fmt.Errorf("compute-image: create cache dir: %w", err)
+	for _, d := range []string{paths.Cache, paths.Dir} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			return nil, fmt.Errorf("compute-image: create dir %s: %w", d, err)
+		}
 	}
 
 	registry, repo, tag, err := parseImageRef(ref.Image)
@@ -23,8 +30,8 @@ func pullContainer(ref ContainerRef) (*ContainerImage, error) {
 	}
 
 	logf("[*] Pulling container image: %s", ref.Image)
+	logf("    Dir: %s", paths.Dir)
 
-	// Resolve manifest list → platform-specific manifest
 	manifestBytes, err := fetchManifestWithAuth(registry, repo, tag, "")
 	if err != nil {
 		return nil, fmt.Errorf("compute-image: fetch manifest: %w", err)
@@ -40,23 +47,23 @@ func pullContainer(ref ContainerRef) (*ContainerImage, error) {
 	}
 	logf("[+] Manifest resolved. %d layer(s).", len(layers))
 
-	// Download layers to cache
-	cachedTars, err := downloadLayers(registry, repo, layers, ref.Cache)
+	cachedTars, err := downloadLayers(registry, repo, layers, paths.Cache)
 	if err != nil {
 		return nil, err
 	}
 
-	// Import into HCS layer + scratch
-	if err := importLayers(ctx, cachedTars, ref.BaseDir, ref.Scratch); err != nil {
+	if err := importLayers(ctx, cachedTars, paths.Base, paths.Scratch); err != nil {
 		return nil, err
 	}
 
 	logf("[+] Container image ready.")
-	logf("    Base: %s", ref.BaseDir)
-	logf("    Scratch: %s", ref.Scratch)
+	logf("    Base:    %s", paths.Base)
+	logf("    Scratch: %s", paths.Scratch)
 
 	return &ContainerImage{
-		BaseLayer: ref.BaseDir,
-		Scratch:   ref.Scratch,
+		Image:     ref.Image,
+		Paths:     paths,
+		BaseLayer: paths.Base,
+		Scratch:   paths.Scratch,
 	}, nil
 }
