@@ -71,7 +71,7 @@ func resolveVMPaths(ref VMRef) (VMPaths, error) {
 	cache := filepath.Join(ref.Dir, "cache")
 	return VMPaths{
 		Dir:   imageDir,
-		Disk:  filepath.Join(imageDir, "disk.raw"),
+		Disk:  filepath.Join(imageDir, "disk.vhd"),
 		Cache: cache,
 	}, nil
 }

@@ -6,7 +6,6 @@ import (
 )
 
 func pullVM(ref VMRef) (*VMImage, error) {
-	// Resolve a default registry when the caller omitted one.
 	if ref.Registry == "" {
 		name, _, err := parseVMRef(ref.Image)
 		if err != nil {
@@ -39,16 +38,21 @@ func pullVM(ref VMRef) (*VMImage, error) {
 		return nil, err
 	}
 
-	logf("[*] Converting to raw...")
+	// qcow2 → raw (intermediate, kept in cache next to the qcow2)
+	logf("[*] Converting qcow2 to raw...")
 	rawPath := cachedQcow2[:len(cachedQcow2)-len(".qcow2")] + ".raw"
 	if err := convertQcow2ToRaw(cachedQcow2, rawPath); err != nil {
 		return nil, fmt.Errorf("compute-image: convert qcow2: %w", err)
 	}
 
-	logf("[*] Extracting to: %s", paths.Disk)
-	if err := extractVM(rawPath, paths.Dir); err != nil {
-		return nil, fmt.Errorf("compute-image: extract vm: %w", err)
+	// raw → VHD (pure Go footer append, no exec)
+	logf("[*] Converting raw to VHD: %s", paths.Disk)
+	if err := convertRawToVHD(rawPath, paths.Disk); err != nil {
+		return nil, fmt.Errorf("compute-image: convert vhd: %w", err)
 	}
+
+	// Raw is only needed for conversion — clean it up.
+	os.Remove(rawPath)
 
 	logf("[+] VM image ready.")
 	logf("    Disk: %s", paths.Disk)
