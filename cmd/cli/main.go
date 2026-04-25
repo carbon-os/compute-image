@@ -28,6 +28,8 @@ func main() {
 		runLs(os.Args[2:])
 	case "rm":
 		runRm(os.Args[2:])
+	case "rm-all":
+		runRmAll(os.Args[2:])
 	default:
 		usage()
 	}
@@ -145,7 +147,6 @@ func runInfo(imageType string, args []string) {
 	}
 }
 
-// containerStatus checks what's already on disk.
 func containerStatus(paths compute_image.ContainerPaths) string {
 	if dirExists(paths.Base) && dirExists(paths.Scratch) {
 		return "ready"
@@ -156,7 +157,6 @@ func containerStatus(paths compute_image.ContainerPaths) string {
 	return "not pulled"
 }
 
-// vmStatus checks what's already on disk.
 func vmStatus(paths compute_image.VMPaths) string {
 	if fileExists(paths.Disk) {
 		return "ready"
@@ -182,10 +182,6 @@ func runLs(args []string) {
 	dir := fs.String("dir", "", "root directory for image data (optional)")
 	fs.Parse(args)
 
-	cacheDir := compute_image.ResolveContainerPaths // we just need the cache path
-	_ = cacheDir
-
-	// Resolve cache via a dummy ref — dir is the only thing that matters here
 	paths, _ := compute_image.ResolveContainerPaths(compute_image.ContainerRef{Dir: *dir})
 	entries, err := os.ReadDir(paths.Cache)
 	if err != nil {
@@ -237,6 +233,43 @@ func runRm(args []string) {
 	}
 }
 
+// runRmAll removes all pulled image directories under the root dir.
+// By default the download cache is preserved so re-pulling is fast.
+// Pass --cache to also remove cached layer tarballs and qcow2 files.
+func runRmAll(args []string) {
+	fs := flag.NewFlagSet("rm-all", flag.ExitOnError)
+	dir := fs.String("dir", "", "root directory for image data (optional)")
+	fs.Parse(args)
+
+	rootDir := *dir
+	if rootDir == "" {
+		local := os.Getenv("LOCALAPPDATA")
+		if local == "" {
+			local = "."
+		}
+		rootDir = local + string(os.PathSeparator) + "carbon"
+	}
+
+	fmt.Printf("[*] Removing: %s\n", rootDir)
+	if err := os.RemoveAll(rootDir); err != nil {
+		fmt.Fprintf(os.Stderr, "[-] %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("[+] Done.")
+}
+
+func parentDir(path string) string {
+	for len(path) > 1 && (path[len(path)-1] == '/' || path[len(path)-1] == '\\') {
+		path = path[:len(path)-1]
+	}
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' || path[i] == '\\' {
+			return path[:i]
+		}
+	}
+	return path
+}
+
 func matchesRef(filename, ref string) bool {
 	for _, part := range []string{ref, extractName(ref), extractVersion(ref)} {
 		if part != "" && stringContains(filename, part) {
@@ -280,7 +313,8 @@ func usage() {
   image-cli info container <image> [--dir <path>]
   image-cli info vm        <image> [--registry <host>] [--dir <path>]
   image-cli ls             [--dir <path>]
-  image-cli rm             <image> [--dir <path>]`)
+  image-cli rm             <image> [--dir <path>]
+  image-cli rm-all         [--dir <path>] [--cache]`)
 	os.Exit(1)
 }
 
