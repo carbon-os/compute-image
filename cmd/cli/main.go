@@ -1,0 +1,360 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	compute_image "github.com/carbon-os/compute-image"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		usage()
+	}
+
+	switch os.Args[1] {
+	case "pull":
+		if len(os.Args) < 3 {
+			usage()
+		}
+		runPull(os.Args[2], os.Args[3:])
+	case "info":
+		if len(os.Args) < 3 {
+			usage()
+		}
+		runInfo(os.Args[2], os.Args[3:])
+	case "ls":
+		runLs(os.Args[2:])
+	case "rm":
+		runRm(os.Args[2:])
+	case "rm-all":
+		runRmAll(os.Args[2:])
+	default:
+		usage()
+	}
+}
+
+// reorderArgs moves flag tokens (and their values) before positional tokens,
+// so that Go's flag package doesn't stop early on a positional argument.
+func reorderArgs(args []string) []string {
+	var flags, pos []string
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "-") {
+			flags = append(flags, args[i])
+			// if this flag uses a separate value token (not -flag=value),
+			// grab the next token too so it stays paired.
+			if !strings.Contains(args[i], "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+				flags = append(flags, args[i])
+			}
+		} else {
+			pos = append(pos, args[i])
+		}
+	}
+	return append(flags, pos...)
+}
+
+func runPull(imageType string, args []string) {
+	switch imageType {
+	case "container":
+		fs := flag.NewFlagSet("pull container", flag.ExitOnError)
+		dir := fs.String("dir", "", "root directory for image data (optional)")
+		fs.Parse(reorderArgs(args))
+
+		if fs.NArg() < 1 {
+			fmt.Fprintln(os.Stderr, "usage: image-cli pull container <image> [--dir <path>]")
+			os.Exit(1)
+		}
+
+		img, err := compute_image.Pull(compute_image.ContainerRef{Image: fs.Arg(0), Dir: *dir})
+		if err != nil {
+			fatal(err)
+		}
+		paths := compute_image.ContainerPathsFromImage(img)
+		fmt.Printf("\n[+] Container image ready.\n")
+		printNonEmpty("Dir", paths.Dir)
+		printNonEmpty("Base", paths.Base)
+		printNonEmpty("Scratch", paths.Scratch)
+		printNonEmpty("Layers", paths.Layers)
+		printNonEmpty("Upper", paths.Upper)
+		printNonEmpty("Work", paths.Work)
+		printNonEmpty("Cache", paths.Cache)
+
+	case "vm":
+		fs := flag.NewFlagSet("pull vm", flag.ExitOnError)
+		arch     := fs.String("arch", "", "target architecture: amd64, arm64, arm, ppc64el, riscv64")
+		registry := fs.String("registry", "", "VM image registry hostname (optional for well-known images)")
+		dir      := fs.String("dir", "", "root directory for image data (optional)")
+		fs.Parse(reorderArgs(args))
+
+		if fs.NArg() < 1 {
+			fmt.Fprintln(os.Stderr, "usage: image-cli pull vm <image> --arch <arch> [--registry <host>] [--dir <path>]")
+			os.Exit(1)
+		}
+		if *arch == "" {
+			fmt.Fprintln(os.Stderr, "error: --arch is required (e.g. --arch amd64)")
+			os.Exit(1)
+		}
+
+		img, err := compute_image.Pull(compute_image.VMRef{
+			Image:    fs.Arg(0),
+			Registry: *registry,
+			Arch:     *arch,
+			Dir:      *dir,
+		})
+		if err != nil {
+			fatal(err)
+		}
+		paths := compute_image.VMPathsFromImage(img)
+		fmt.Printf("\n[+] VM image ready.\n")
+		fmt.Printf("    Dir:   %s\n", paths.Dir)
+		fmt.Printf("    Disk:  %s\n", paths.Disk)
+		fmt.Printf("    Cache: %s\n", paths.Cache)
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown image type %q — expected 'container' or 'vm'\n", imageType)
+		os.Exit(1)
+	}
+}
+
+func runInfo(imageType string, args []string) {
+	switch imageType {
+	case "container":
+		fs := flag.NewFlagSet("info container", flag.ExitOnError)
+		dir := fs.String("dir", "", "root directory for image data (optional)")
+		fs.Parse(reorderArgs(args))
+
+		if fs.NArg() < 1 {
+			fmt.Fprintln(os.Stderr, "usage: image-cli info container <image> [--dir <path>]")
+			os.Exit(1)
+		}
+
+		paths, err := compute_image.ResolveContainerPaths(compute_image.ContainerRef{Image: fs.Arg(0), Dir: *dir})
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Image:  %s\n", fs.Arg(0))
+		printNonEmpty("Dir", paths.Dir)
+		printNonEmpty("Base", paths.Base)
+		printNonEmpty("Scratch", paths.Scratch)
+		printNonEmpty("Layers", paths.Layers)
+		printNonEmpty("Upper", paths.Upper)
+		printNonEmpty("Work", paths.Work)
+		printNonEmpty("Cache", paths.Cache)
+		fmt.Printf("Status: %s\n", containerStatus(paths))
+
+	case "vm":
+		fs := flag.NewFlagSet("info vm", flag.ExitOnError)
+		arch     := fs.String("arch", "", "target architecture: amd64, arm64, arm, ppc64el, riscv64")
+		registry := fs.String("registry", "", "VM image registry hostname (optional for well-known images)")
+		dir      := fs.String("dir", "", "root directory for image data (optional)")
+		fs.Parse(reorderArgs(args))
+
+		if fs.NArg() < 1 {
+			fmt.Fprintln(os.Stderr, "usage: image-cli info vm <image> --arch <arch> [--registry <host>] [--dir <path>]")
+			os.Exit(1)
+		}
+		if *arch == "" {
+			fmt.Fprintln(os.Stderr, "error: --arch is required (e.g. --arch amd64)")
+			os.Exit(1)
+		}
+
+		paths, err := compute_image.ResolveVMPaths(compute_image.VMRef{
+			Image:    fs.Arg(0),
+			Registry: *registry,
+			Arch:     *arch,
+			Dir:      *dir,
+		})
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Image:    %s\n", fs.Arg(0))
+		fmt.Printf("Arch:     %s\n", *arch)
+		fmt.Printf("Registry: %s\n", *registry)
+		fmt.Printf("Dir:      %s\n", paths.Dir)
+		fmt.Printf("Disk:     %s\n", paths.Disk)
+		fmt.Printf("Cache:    %s\n", paths.Cache)
+		fmt.Printf("Status:   %s\n", vmStatus(paths))
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown image type %q — expected 'container' or 'vm'\n", imageType)
+		os.Exit(1)
+	}
+}
+
+func containerStatus(p compute_image.ContainerPaths) string {
+	if dirExists(p.Base) && dirExists(p.Scratch) {
+		return "ready"
+	}
+	if dirExists(p.Layers) {
+		return "ready"
+	}
+	if dirExists(p.Cache) {
+		return "cached"
+	}
+	return "not pulled"
+}
+
+func vmStatus(p compute_image.VMPaths) string {
+	if fileExists(p.Disk) {
+		return "ready"
+	}
+	if dirExists(p.Cache) {
+		return "cached"
+	}
+	return "not pulled"
+}
+
+func runLs(args []string) {
+	fs := flag.NewFlagSet("ls", flag.ExitOnError)
+	dir := fs.String("dir", "", "root directory for image data (optional)")
+	fs.Parse(reorderArgs(args))
+
+	paths, _ := compute_image.ResolveContainerPaths(compute_image.ContainerRef{Dir: *dir})
+	entries, err := os.ReadDir(paths.Cache)
+	if err != nil {
+		fmt.Printf("(empty — %s not found)\n", paths.Cache)
+		return
+	}
+	fmt.Printf("Cache: %s\n\n", paths.Cache)
+	for _, e := range entries {
+		info, _ := e.Info()
+		size := int64(0)
+		if info != nil {
+			size = info.Size()
+		}
+		fmt.Printf("  %-70s  %s\n", e.Name(), compute_image.HumanBytes(size))
+	}
+}
+
+func runRm(args []string) {
+	fs := flag.NewFlagSet("rm", flag.ExitOnError)
+	dir := fs.String("dir", "", "root directory for image data (optional)")
+	fs.Parse(reorderArgs(args))
+
+	if fs.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "usage: image-cli rm <image> [--dir <path>]")
+		os.Exit(1)
+	}
+
+	image := fs.Arg(0)
+
+	if err := compute_image.Remove(compute_image.ContainerRef{Image: image, Dir: *dir}); err != nil {
+		fatal(err)
+	}
+
+	paths, _ := compute_image.ResolveContainerPaths(compute_image.ContainerRef{Dir: *dir})
+	entries, err := os.ReadDir(paths.Cache)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if matchesRef(e.Name(), image) {
+			p := filepath.Join(paths.Cache, e.Name())
+			if err := os.Remove(p); err != nil {
+				fmt.Fprintf(os.Stderr, "rm cache %s: %v\n", e.Name(), err)
+			} else {
+				fmt.Printf("removed cache: %s\n", e.Name())
+			}
+		}
+	}
+}
+
+func runRmAll(args []string) {
+	fs := flag.NewFlagSet("rm-all", flag.ExitOnError)
+	dir := fs.String("dir", "", "root directory for image data (optional)")
+	fs.Parse(reorderArgs(args))
+
+	rootDir := *dir
+	if rootDir == "" {
+		rootDir = compute_image.DefaultRootDir()
+	}
+
+	fmt.Printf("[*] Removing: %s\n", rootDir)
+	if err := compute_image.RemoveAll(rootDir); err != nil {
+		fmt.Fprintf(os.Stderr, "[-] %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("[+] Done.")
+}
+
+func printNonEmpty(label, value string) {
+	if value != "" {
+		fmt.Printf("    %-8s %s\n", label+":", value)
+	}
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func matchesRef(filename, ref string) bool {
+	for _, part := range []string{ref, extractName(ref), extractVersion(ref)} {
+		if part != "" && stringContains(filename, part) {
+			return true
+		}
+	}
+	return false
+}
+
+func extractName(ref string) string {
+	for i := len(ref) - 1; i >= 0; i-- {
+		if ref[i] == ':' {
+			return ref[:i]
+		}
+	}
+	return ref
+}
+
+func extractVersion(ref string) string {
+	for i := len(ref) - 1; i >= 0; i-- {
+		if ref[i] == ':' {
+			return ref[i+1:]
+		}
+	}
+	return ""
+}
+
+func stringContains(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
+func usage() {
+	fmt.Fprintln(os.Stderr, `usage:
+  image-cli pull container <image>        [--dir <path>]
+  image-cli pull vm        <image>        --arch <arch> [--registry <host>] [--dir <path>]
+  image-cli info container <image>        [--dir <path>]
+  image-cli info vm        <image>        --arch <arch> [--registry <host>] [--dir <path>]
+  image-cli ls                            [--dir <path>]
+  image-cli rm             <image>        [--dir <path>]
+  image-cli rm-all                        [--dir <path>]
+
+  Supported architectures: amd64, arm64, arm, ppc64el, riscv64
+
+  Examples:
+    image-cli pull vm ubuntu:22.04        --arch amd64
+    image-cli pull vm ubuntu:noble        --arch arm64
+    image-cli pull vm debian:bookworm     --arch amd64
+    image-cli pull vm debian:12           --arch arm64
+    image-cli pull vm alpine:3.19         --arch amd64 --registry my.registry.example.com`)
+	os.Exit(1)
+}
+
+func fatal(err error) {
+	fmt.Fprintf(os.Stderr, "[-] %v\n", err)
+	os.Exit(1)
+}
