@@ -21,7 +21,6 @@ func Pull(ref Ref) (*Image, error) {
 		return nil, fmt.Errorf("vm: parse ref: %w", err)
 	}
 
-	// Validate version and arch before touching the network.
 	if err := Validate(name, version, ref.Arch); err != nil {
 		return nil, fmt.Errorf("vm: %w", err)
 	}
@@ -55,17 +54,19 @@ func Pull(ref Ref) (*Image, error) {
 		return nil, err
 	}
 
-	logf.Logf("[*] Converting qcow2 → raw...")
+	// Always produce a flat raw image from whatever qcow2 was downloaded.
 	rawPath := strings.TrimSuffix(cachedQcow2, ".qcow2") + ".raw"
+	logf.Logf("[*] Converting qcow2 → raw...")
 	if err := convertQcow2ToRaw(cachedQcow2, rawPath); err != nil {
 		return nil, fmt.Errorf("vm: convert qcow2: %w", err)
 	}
 
-	logf.Logf("[*] Converting raw → VHD: %s", paths.Disk)
-	if err := convertRawToVHD(rawPath, paths.Disk); err != nil {
-		return nil, fmt.Errorf("vm: convert vhd: %w", err)
+	// finalizeDisk is platform-specific: VHD on Windows, plain .img elsewhere.
+	logf.Logf("[*] Finalising disk image: %s", paths.Disk)
+	if err := finalizeDisk(rawPath, paths.Disk); err != nil {
+		return nil, fmt.Errorf("vm: finalise disk: %w", err)
 	}
-	os.Remove(rawPath)
+	os.Remove(rawPath) // no-op on Windows (Rename already moved it) but safe to call
 
 	logf.Logf("[+] VM image ready.")
 	logf.Logf("    Disk: %s", paths.Disk)
@@ -73,7 +74,22 @@ func Pull(ref Ref) (*Image, error) {
 	return &Image{Image: ref.Image, Paths: paths, OutPath: paths.Disk}, nil
 }
 
-// Remove deletes all on-disk data for ref. Cache files are left intact.
+// resolvePaths uses the diskFile constant so the extension is correct per platform.
+func resolvePaths(ref Ref) (Paths, error) {
+	name, version, err := ParseRef(ref.Image)
+	if err != nil {
+		return Paths{}, err
+	}
+	imageDir := filepath.Join(ref.Dir, ref.Registry, name, version, ref.Arch)
+	return Paths{
+		Dir:   imageDir,
+		Disk:  filepath.Join(imageDir, diskFile), // ← was hardcoded "disk.vhd"
+		Cache: filepath.Join(ref.Dir, "cache"),
+	}, nil
+}
+
+// --- everything below is unchanged ---
+
 func Remove(ref Ref) error {
 	ref.Dir = resolveDir(ref.Dir)
 	paths, err := resolvePaths(ref)
@@ -87,7 +103,6 @@ func Remove(ref Ref) error {
 	return nil
 }
 
-// ResolvePaths returns the fully resolved paths for ref without pulling anything.
 func ResolvePaths(ref Ref) (Paths, error) {
 	if ref.Arch == "" {
 		return Paths{}, fmt.Errorf("vm: Arch must be set (e.g. \"amd64\", \"arm64\")")
@@ -96,8 +111,6 @@ func ResolvePaths(ref Ref) (Paths, error) {
 	return resolvePaths(ref)
 }
 
-// ParseRef splits "name:version" into its components.
-// Version defaults to "latest" if omitted.
 func ParseRef(image string) (name, version string, err error) {
 	if image == "" {
 		return "", "", fmt.Errorf("image ref must not be empty")
@@ -116,22 +129,17 @@ func ParseRef(image string) (name, version string, err error) {
 	return name, version, nil
 }
 
-// fetchVMImage downloads the qcow2 into cacheDir and returns the local path.
-// Returns immediately on a cache hit.
 func fetchVMImage(image, reg, arch, cacheDir string) (string, error) {
 	name, version, err := ParseRef(image)
 	if err != nil {
 		return "", err
 	}
-
 	url := buildImageURL(reg, name, version, arch)
 	dest := filepath.Join(cacheDir, filepath.Base(url))
-
 	if registry.IsCacheValid(dest) {
 		logf.Logf("[*] Using cached image: %s", filepath.Base(dest))
 		return dest, nil
 	}
-
 	logf.Logf("[*] Downloading: %s", url)
 	tmp := dest + ".tmp"
 	if err := registry.DownloadFile(url, tmp); err != nil {
@@ -139,25 +147,11 @@ func fetchVMImage(image, reg, arch, cacheDir string) (string, error) {
 		return "", fmt.Errorf("fetch vm image: %w", err)
 	}
 	fmt.Println()
-
 	if err := os.Rename(tmp, dest); err != nil {
 		os.Remove(tmp)
 		return "", fmt.Errorf("fetch vm image: finalise: %w", err)
 	}
 	return dest, nil
-}
-
-func resolvePaths(ref Ref) (Paths, error) {
-	name, version, err := ParseRef(ref.Image)
-	if err != nil {
-		return Paths{}, err
-	}
-	imageDir := filepath.Join(ref.Dir, ref.Registry, name, version, ref.Arch)
-	return Paths{
-		Dir:   imageDir,
-		Disk:  filepath.Join(imageDir, "disk.vhd"),
-		Cache: filepath.Join(ref.Dir, "cache"),
-	}, nil
 }
 
 func resolveDir(dir string) string {
