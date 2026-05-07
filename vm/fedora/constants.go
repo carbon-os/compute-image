@@ -1,25 +1,30 @@
 package fedora
 
 const (
-	DefaultReg   = "download.fedoraproject.org"
-	downloadPath = "https://%s/pub/fedora/linux/releases/%s/Cloud/%s/images/Fedora-Cloud-Base-Generic-%s.%s.qcow2"
+	DefaultReg  = "download.fedoraproject.org"
+	ArchiveReg  = "archives.fedoraproject.org"
+	livePath    = "https://%s/pub/fedora/linux/releases/%s/Cloud/%s/images/Fedora-Cloud-Base-Generic-%s.%s.qcow2"
+	archivePath = "https://%s/pub/archive/fedora/linux/releases/%s/Cloud/%s/images/Fedora-Cloud-Base-Generic-%s.%s.qcow2"
 )
 
-// ValidMajors is the set of supported Fedora major release numbers.
-// Fedora supports the current release plus the previous one (≈13 months).
+// BuildStrings maps each supported Fedora major to its canonical release build
+// string. This is what appears in the filename on the download servers.
 //
-// As of May 2026:
-//   - 41  released Oct 2024, EOL Nov 2025 — images still downloadable
-//   - 42  released Apr 2025 — current supported release
-//
-// Source: https://fedoraproject.org/wiki/Releases
-var ValidMajors = map[string]bool{
+// Sources verified May 2026:
+//   - 41-1.4  archives.fedoraproject.org (EOL Nov 2025, moved to archive)
+//   - 42-1.1  download.fedoraproject.org (current release, Apr 2025)
+var BuildStrings = map[string]string{
+	"41": "41-1.4",
+	"42": "42-1.1",
+}
+
+// ArchivedMajors are releases that have moved off the main mirror network to
+// archives.fedoraproject.org, which also uses a different URL path prefix.
+var ArchivedMajors = map[string]bool{
 	"41": true,
-	"42": true,
 }
 
 // ValidArches are the canonical arch names accepted by this package.
-// Fedora Cloud Generic images are built for x86_64 and aarch64.
 var ValidArches = map[string]bool{
 	"amd64": true,
 	"arm64": true,
