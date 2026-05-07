@@ -2,7 +2,12 @@ package rocky
 
 const (
 	DefaultReg = "dl.rockylinux.org"
+
+	// Rocky 8 and 9 use the bare GenericCloud name.
 	downloadPath = "https://%s/pub/rocky/%s/images/%s/Rocky-%s-GenericCloud.latest.%s.qcow2"
+
+	// Rocky 10+ split into -Base and -LVM variants; we default to -Base.
+	downloadPathV10 = "https://%s/pub/rocky/%s/images/%s/Rocky-%s-GenericCloud-Base.latest.%s.qcow2"
 )
 
 // ValidMajors is the set of supported Rocky Linux major versions.

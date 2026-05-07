@@ -10,10 +10,18 @@ func DefaultRegistry() string { return DefaultReg }
 // BuildURL constructs the GenericCloud qcow2 download URL.
 // version can be a major ("9") or a full patch version ("9.7") — only the
 // major segment is used since Rocky publishes a stable .latest. symlink.
+//
+// Rocky 10 changed the image naming convention: the bare "GenericCloud" name
+// was replaced with "GenericCloud-Base" and "GenericCloud-LVM" variants.
+// We always target -Base as the closest equivalent to the pre-10 image.
 func BuildURL(reg, version, arch string) string {
 	ra := toRockyArch(arch)
 	major := majorVersion(version)
-	return fmt.Sprintf(downloadPath, reg, major, ra, major, ra)
+	path := downloadPath
+	if major == "10" {
+		path = downloadPathV10
+	}
+	return fmt.Sprintf(path, reg, major, ra, major, ra)
 }
 
 // Validate checks that version resolves to a supported Rocky Linux major release
