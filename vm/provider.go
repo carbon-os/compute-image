@@ -10,6 +10,8 @@ import (
 	"github.com/carbon-os/compute-image/vm/opensuse"
 	"github.com/carbon-os/compute-image/vm/rocky"
 	"github.com/carbon-os/compute-image/vm/ubuntu"
+	"github.com/carbon-os/compute-image/vm/almalinux"
+	"github.com/carbon-os/compute-image/vm/centos"
 )
 
 // Provider is implemented by each distro sub-package.
@@ -109,4 +111,6 @@ func init() {
 	Register("opensuse", adapt(opensuse.DefaultRegistry, opensuse.BuildURL, opensuse.Validate))
 	Register("rocky",    adapt(rocky.DefaultRegistry,    rocky.BuildURL,    rocky.Validate))
 	Register("arch",     adapt(arch.DefaultRegistry,     arch.BuildURL,     arch.Validate))
+	Register("almalinux", adapt(almalinux.DefaultRegistry, almalinux.BuildURL, almalinux.Validate))
+	Register("centos",    adapt(centos.DefaultRegistry,    centos.BuildURL,    centos.Validate))
 }
