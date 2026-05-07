@@ -26,7 +26,7 @@ func Validate(version, arch string) error {
 	branch := majorMinor(version)
 	if !ValidBranches[branch] {
 		return fmt.Errorf(
-			"alpine: unsupported version %q — valid versions: 3.20, 3.21, 3.22, 3.23, 3.24",
+			"alpine: unsupported version %q — valid versions: 3.20, 3.21, 3.22, 3.23",
 			version,
 		)
 	}
@@ -34,7 +34,7 @@ func Validate(version, arch string) error {
 }
 
 // resolve expands a bare branch ref to its latest known patch release.
-// "3.21" → "3.21.7".  Full versions pass through unchanged.
+// "3.21" → "3.21.7". Full versions pass through unchanged.
 func resolve(version string) string {
 	if !hasPatch(version) {
 		if patch, ok := LatestPatch[version]; ok {

@@ -12,10 +12,8 @@
 | 3.22    | arm64 |
 | 3.23    | amd64 |
 | 3.23    | arm64 |
-| 3.24    | amd64 |
-| 3.24    | arm64 |
 
-> A full patch version is required (e.g. `alpine:3.23.4`). Bare branch refs such as `alpine:3.23` will be rejected. 3.20 reached EOL 2026-05-01 but images remain downloadable.
+> Branch refs are accepted (e.g. `alpine:3.23`) and resolve to the latest patch automatically. Full patch versions also work (e.g. `alpine:3.23.4`). 3.20 reached EOL 2026-05-01 but images remain downloadable.
 
 ---
 
