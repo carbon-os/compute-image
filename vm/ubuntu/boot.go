@@ -28,7 +28,7 @@ func BootConfig(version, arch string) (boot.Config, error) {
 		cfg.BootDir = "/boot"
 		switch arch {
 		case "amd64":
-			cfg.Partition = 16
+			cfg.Partition = 1  // fix: was 16, boot lives on partition 1
 		case "arm64":
 			cfg.Partition = 1
 		default:
