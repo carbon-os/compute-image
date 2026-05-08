@@ -9,6 +9,7 @@ require github.com/carbon-os/compute-image v0.0.0-00010101000000-000000000000
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/Microsoft/hcsshim v0.14.1 // indirect
+	github.com/carbon-os/diskimg v0.0.0-20260508003626-40c881da7c3c // indirect
 	github.com/containerd/cgroups/v3 v3.0.5 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
