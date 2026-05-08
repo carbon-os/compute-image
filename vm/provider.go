@@ -3,15 +3,15 @@ package vm
 import (
 	"fmt"
 
+	"github.com/carbon-os/compute-image/vm/almalinux"
 	"github.com/carbon-os/compute-image/vm/alpine"
 	"github.com/carbon-os/compute-image/vm/arch"
+	"github.com/carbon-os/compute-image/vm/centos"
 	"github.com/carbon-os/compute-image/vm/debian"
 	"github.com/carbon-os/compute-image/vm/fedora"
 	"github.com/carbon-os/compute-image/vm/opensuse"
 	"github.com/carbon-os/compute-image/vm/rocky"
 	"github.com/carbon-os/compute-image/vm/ubuntu"
-	"github.com/carbon-os/compute-image/vm/almalinux"
-	"github.com/carbon-os/compute-image/vm/centos"
 )
 
 // Provider is implemented by each distro sub-package.
@@ -21,13 +21,17 @@ type Provider interface {
 	// Validate returns a descriptive error for any unsupported version or arch
 	// before a download is attempted.
 	Validate(version, arch string) error
+	// BootConfig returns the partition and filename patterns needed to extract
+	// the kernel and initrd from a pulled disk image.
+	BootConfig(version, arch string) (BootConfig, error)
 }
 
 type Ref struct {
-	Image    string
-	Registry string
-	Arch     string
-	Dir      string
+	Image         string
+	Registry      string
+	Arch          string
+	Dir           string
+	ExtractKernel bool // extract vmlinuz and initrd alongside the disk image
 }
 
 type Image struct {
@@ -81,13 +85,15 @@ func Validate(name, version, canonicalArch string) error {
 
 func adapt(
 	defaultReg func() string,
-	buildURL func(string, string, string) string,
-	validate func(version, arch string) error,
+	buildURL   func(string, string, string) string,
+	validate   func(version, arch string) error,
+	bootCfg    func(version, arch string) (BootConfig, error),
 ) Provider {
 	return &fnProvider{
 		defaultRegistry: defaultReg,
 		buildURL:        buildURL,
 		validate:        validate,
+		bootConfig:      bootCfg,
 	}
 }
 
@@ -95,22 +101,24 @@ type fnProvider struct {
 	defaultRegistry func() string
 	buildURL        func(reg, version, arch string) string
 	validate        func(version, arch string) error
+	bootConfig      func(version, arch string) (BootConfig, error)
 }
 
-func (p *fnProvider) DefaultRegistry() string                   { return p.defaultRegistry() }
-func (p *fnProvider) BuildURL(reg, version, arch string) string { return p.buildURL(reg, version, arch) }
-func (p *fnProvider) Validate(version, arch string) error       { return p.validate(version, arch) }
+func (p *fnProvider) DefaultRegistry() string                          { return p.defaultRegistry() }
+func (p *fnProvider) BuildURL(r, v, a string) string                   { return p.buildURL(r, v, a) }
+func (p *fnProvider) Validate(v, a string) error                       { return p.validate(v, a) }
+func (p *fnProvider) BootConfig(v, a string) (BootConfig, error)       { return p.bootConfig(v, a) }
 
 // — wiring —
 
 func init() {
-	Register("alpine",   adapt(alpine.DefaultRegistry,   alpine.BuildURL,   alpine.Validate))
-	Register("debian",   adapt(debian.DefaultRegistry,   debian.BuildURL,   debian.Validate))
-	Register("ubuntu",   adapt(ubuntu.DefaultRegistry,   ubuntu.BuildURL,   ubuntu.Validate))
-	Register("fedora",   adapt(fedora.DefaultRegistry,   fedora.BuildURL,   fedora.Validate))
-	Register("opensuse", adapt(opensuse.DefaultRegistry, opensuse.BuildURL, opensuse.Validate))
-	Register("rocky",    adapt(rocky.DefaultRegistry,    rocky.BuildURL,    rocky.Validate))
-	Register("arch",     adapt(arch.DefaultRegistry,     arch.BuildURL,     arch.Validate))
-	Register("almalinux", adapt(almalinux.DefaultRegistry, almalinux.BuildURL, almalinux.Validate))
-	Register("centos",    adapt(centos.DefaultRegistry,    centos.BuildURL,    centos.Validate))
+	Register("alpine",    adapt(alpine.DefaultRegistry,    alpine.BuildURL,    alpine.Validate,    alpine.BootConfig))
+	Register("debian",    adapt(debian.DefaultRegistry,    debian.BuildURL,    debian.Validate,    debian.BootConfig))
+	Register("ubuntu",    adapt(ubuntu.DefaultRegistry,    ubuntu.BuildURL,    ubuntu.Validate,    ubuntu.BootConfig))
+	Register("fedora",    adapt(fedora.DefaultRegistry,    fedora.BuildURL,    fedora.Validate,    fedora.BootConfig))
+	Register("opensuse",  adapt(opensuse.DefaultRegistry,  opensuse.BuildURL,  opensuse.Validate,  opensuse.BootConfig))
+	Register("rocky",     adapt(rocky.DefaultRegistry,     rocky.BuildURL,     rocky.Validate,     rocky.BootConfig))
+	Register("arch",      adapt(arch.DefaultRegistry,      arch.BuildURL,      arch.Validate,      arch.BootConfig))
+	Register("almalinux", adapt(almalinux.DefaultRegistry, almalinux.BuildURL, almalinux.Validate, almalinux.BootConfig))
+	Register("centos",    adapt(centos.DefaultRegistry,    centos.BuildURL,    centos.Validate,    centos.BootConfig))
 }

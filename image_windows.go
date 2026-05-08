@@ -17,7 +17,13 @@ func Pull(ref any) (any, error) {
 	case ContainerRef:
 		return wincontainer.Pull(wincontainer.Ref{Image: r.Image, Dir: r.Dir})
 	case VMRef:
-		return vm.Pull(vm.Ref{Image: r.Image, Registry: r.Registry, Arch: r.Arch, Dir: r.Dir})
+		return vm.Pull(vm.Ref{
+			Image:         r.Image,
+			Registry:      r.Registry,
+			Arch:          r.Arch,
+			Dir:           r.Dir,
+			ExtractKernel: r.ExtractKernel,
+		})
 	default:
 		return nil, fmt.Errorf("compute-image: unknown ref type %T", ref)
 	}

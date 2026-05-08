@@ -54,24 +54,49 @@ func Pull(ref Ref) (*Image, error) {
 		return nil, err
 	}
 
-	// Always produce a flat raw image from whatever qcow2 was downloaded.
 	rawPath := strings.TrimSuffix(cachedQcow2, ".qcow2") + ".raw"
 	logf.Logf("[*] Converting qcow2 → raw...")
 	if err := convertQcow2ToRaw(cachedQcow2, rawPath); err != nil {
 		return nil, fmt.Errorf("vm: convert qcow2: %w", err)
 	}
 
-	// finalizeDisk is platform-specific: VHD on Windows, plain .img elsewhere.
 	logf.Logf("[*] Finalising disk image: %s", paths.Disk)
 	if err := finalizeDisk(rawPath, paths.Disk); err != nil {
 		return nil, fmt.Errorf("vm: finalise disk: %w", err)
 	}
-	os.Remove(rawPath) // no-op on Windows (Rename already moved it) but safe to call
+	os.Remove(rawPath)
+
+	if ref.ExtractKernel {
+		if err := runExtract(name, version, ref.Arch, paths); err != nil {
+			return nil, err
+		}
+	}
 
 	logf.Logf("[+] VM image ready.")
 	logf.Logf("    Disk: %s", paths.Disk)
 
 	return &Image{Image: ref.Image, Paths: paths, OutPath: paths.Disk}, nil
+}
+
+// runExtract resolves the BootConfig for this distro/version/arch and extracts
+// vmlinuz and initrd into the same directory as the disk image.
+func runExtract(name, version, arch string, paths Paths) error {
+	p, ok := lookup(name)
+	if !ok {
+		return fmt.Errorf("vm: no extraction support for distro %q", name)
+	}
+	cfg, err := p.BootConfig(version, arch)
+	if err != nil {
+		return fmt.Errorf("vm: boot config: %w", err)
+	}
+	logf.Logf("[*] Extracting kernel and initrd from partition %d (%s)...",
+		cfg.Partition, cfg.BootDir)
+	if err := extractKernelAndInitrd(paths.Disk, cfg, paths.Dir); err != nil {
+		return fmt.Errorf("vm: extract: %w", err)
+	}
+	logf.Logf("[+] Kernel: %s", filepath.Join(paths.Dir, "vmlinuz"))
+	logf.Logf("[+] Initrd: %s", filepath.Join(paths.Dir, "initrd"))
+	return nil
 }
 
 // resolvePaths uses the diskFile constant so the extension is correct per platform.
@@ -83,12 +108,10 @@ func resolvePaths(ref Ref) (Paths, error) {
 	imageDir := filepath.Join(ref.Dir, ref.Registry, name, version, ref.Arch)
 	return Paths{
 		Dir:   imageDir,
-		Disk:  filepath.Join(imageDir, diskFile), // ← was hardcoded "disk.vhd"
+		Disk:  filepath.Join(imageDir, diskFile),
 		Cache: filepath.Join(ref.Dir, "cache"),
 	}, nil
 }
-
-// --- everything below is unchanged ---
 
 func Remove(ref Ref) error {
 	ref.Dir = resolveDir(ref.Dir)

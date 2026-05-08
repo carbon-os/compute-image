@@ -44,8 +44,6 @@ func reorderArgs(args []string) []string {
 	for i := 0; i < len(args); i++ {
 		if strings.HasPrefix(args[i], "-") {
 			flags = append(flags, args[i])
-			// if this flag uses a separate value token (not -flag=value),
-			// grab the next token too so it stays paired.
 			if !strings.Contains(args[i], "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 				flags = append(flags, args[i])
@@ -85,13 +83,16 @@ func runPull(imageType string, args []string) {
 
 	case "vm":
 		fs := flag.NewFlagSet("pull vm", flag.ExitOnError)
-		arch     := fs.String("arch", "", "target architecture: amd64, arm64, arm, ppc64el, riscv64")
-		registry := fs.String("registry", "", "VM image registry hostname (optional for well-known images)")
-		dir      := fs.String("dir", "", "root directory for image data (optional)")
+		arch          := fs.String("arch", "", "target architecture: amd64, arm64")
+		registry      := fs.String("registry", "", "VM image registry hostname (optional)")
+		dir           := fs.String("dir", "", "root directory for image data (optional)")
+		extractKernel := fs.Bool("extract-kernel", false,
+			"extract vmlinuz and initrd alongside the disk image")
 		fs.Parse(reorderArgs(args))
 
 		if fs.NArg() < 1 {
-			fmt.Fprintln(os.Stderr, "usage: image-cli pull vm <image> --arch <arch> [--registry <host>] [--dir <path>]")
+			fmt.Fprintln(os.Stderr,
+				"usage: image-cli pull vm <image> --arch <arch> [--registry <host>] [--dir <path>] [--extract-kernel]")
 			os.Exit(1)
 		}
 		if *arch == "" {
@@ -100,10 +101,11 @@ func runPull(imageType string, args []string) {
 		}
 
 		img, err := compute_image.Pull(compute_image.VMRef{
-			Image:    fs.Arg(0),
-			Registry: *registry,
-			Arch:     *arch,
-			Dir:      *dir,
+			Image:         fs.Arg(0),
+			Registry:      *registry,
+			Arch:          *arch,
+			Dir:           *dir,
+			ExtractKernel: *extractKernel,
 		})
 		if err != nil {
 			fatal(err)
@@ -112,6 +114,10 @@ func runPull(imageType string, args []string) {
 		fmt.Printf("\n[+] VM image ready.\n")
 		fmt.Printf("    Dir:   %s\n", paths.Dir)
 		fmt.Printf("    Disk:  %s\n", paths.Disk)
+		if *extractKernel {
+			fmt.Printf("    Kernel: %s\n", filepath.Join(paths.Dir, "vmlinuz"))
+			fmt.Printf("    Initrd: %s\n", filepath.Join(paths.Dir, "initrd"))
+		}
 		fmt.Printf("    Cache: %s\n", paths.Cache)
 
 	default:
@@ -148,8 +154,8 @@ func runInfo(imageType string, args []string) {
 
 	case "vm":
 		fs := flag.NewFlagSet("info vm", flag.ExitOnError)
-		arch     := fs.String("arch", "", "target architecture: amd64, arm64, arm, ppc64el, riscv64")
-		registry := fs.String("registry", "", "VM image registry hostname (optional for well-known images)")
+		arch     := fs.String("arch", "", "target architecture: amd64, arm64")
+		registry := fs.String("registry", "", "VM image registry hostname (optional)")
 		dir      := fs.String("dir", "", "root directory for image data (optional)")
 		fs.Parse(reorderArgs(args))
 
@@ -241,7 +247,6 @@ func runRm(args []string) {
 	}
 
 	image := fs.Arg(0)
-
 	if err := compute_image.Remove(compute_image.ContainerRef{Image: image, Dir: *dir}); err != nil {
 		fatal(err)
 	}
@@ -336,21 +341,23 @@ func stringContains(s, sub string) bool {
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
   image-cli pull container <image>        [--dir <path>]
-  image-cli pull vm        <image>        --arch <arch> [--registry <host>] [--dir <path>]
+  image-cli pull vm        <image>        --arch <arch> [--registry <host>] [--dir <path>] [--extract-kernel]
   image-cli info container <image>        [--dir <path>]
   image-cli info vm        <image>        --arch <arch> [--registry <host>] [--dir <path>]
   image-cli ls                            [--dir <path>]
   image-cli rm             <image>        [--dir <path>]
   image-cli rm-all                        [--dir <path>]
 
-  Supported architectures: amd64, arm64, arm, ppc64el, riscv64
+  Supported architectures: amd64, arm64
 
   Examples:
-    image-cli pull vm ubuntu:22.04        --arch amd64
-    image-cli pull vm ubuntu:noble        --arch arm64
-    image-cli pull vm debian:bookworm     --arch amd64
-    image-cli pull vm debian:12           --arch arm64
-    image-cli pull vm alpine:3.19         --arch amd64 --registry my.registry.example.com`)
+    image-cli pull vm ubuntu:22.04  --arch amd64 --extract-kernel
+    image-cli pull vm ubuntu:noble  --arch arm64 --extract-kernel
+    image-cli pull vm debian:13     --arch amd64 --extract-kernel
+    image-cli pull vm alpine:3.22   --arch arm64 --extract-kernel
+    image-cli pull vm fedora:42     --arch amd64 --extract-kernel
+    image-cli pull vm rocky:9       --arch amd64 --extract-kernel
+    image-cli pull vm arch:latest   --arch amd64 --extract-kernel`)
 	os.Exit(1)
 }
 

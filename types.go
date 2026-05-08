@@ -1,34 +1,38 @@
 package compute_image
 
-// ContainerRef describes a container image to pull.
+// ContainerRef identifies a container image and optional storage root.
 type ContainerRef struct {
 	Image string
-	Dir   string // optional; defaults to platform data dir
+	Dir   string
 }
 
-// VMRef describes a VM disk image to pull.
+// VMRef identifies a VM disk image along with its registry, target architecture,
+// and pull-time options.
 type VMRef struct {
 	Image    string
-	Registry string // optional for well-known images
-	Arch     string // e.g. "amd64", "arm64", "arm", "ppc64el", "riscv64"
-	Dir      string // optional; defaults to platform data dir
+	Registry string
+	Arch     string
+	Dir      string
+	// ExtractKernel, when true, extracts "vmlinuz" and "initrd" files into the
+	// same directory as the disk image after a successful pull.
+	ExtractKernel bool
 }
 
-// ContainerPaths holds resolved on-disk locations for a container image.
-// Base and Scratch are populated on Windows; Layers, Upper, and Work on Linux.
+// ContainerPaths holds the resolved filesystem paths for a pulled container image.
+// Fields not applicable to the current platform are left empty.
 type ContainerPaths struct {
-	Dir     string
-	Base    string // Windows: read-only HCS layer directories
-	Scratch string // Windows: writable scratch layer
-	Layers  string // Linux: extracted layer directories (overlayfs lower)
-	Upper   string // Linux: overlayfs upper (writable) dir
-	Work    string // Linux: overlayfs work dir
-	Cache   string
+	Dir     string // image directory
+	Layers  string // Linux overlayfs lower layers (read-only)
+	Upper   string // Linux overlayfs upper layer (writable)
+	Work    string // Linux overlayfs work directory
+	Base    string // Windows base VHD
+	Scratch string // Windows scratch VHD
+	Cache   string // shared download cache
 }
 
-// VMPaths holds resolved on-disk locations for a VM image.
+// VMPaths holds the resolved filesystem paths for a pulled VM disk image.
 type VMPaths struct {
-	Dir   string
-	Disk  string
-	Cache string
+	Dir   string // image directory
+	Disk  string // disk.img on Linux/macOS, disk.vhd on Windows
+	Cache string // shared download cache
 }
