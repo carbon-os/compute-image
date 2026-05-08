@@ -3,28 +3,18 @@ package almalinux
 import (
 	"fmt"
 
-	"github.com/carbon-os/compute-image/vm"
+	"github.com/carbon-os/compute-image/vm/boot"
 )
 
-// BootConfig returns the BootConfig for the given AlmaLinux version and arch.
-//
-// AlmaLinux disk layout (verified May 2026, notes.txt, versions 8–10):
-//
-//	amd64 → partition 3, /
-//	arm64 → partition 2, /
-//
-// The partition assignment is consistent across all three supported majors.
-// The boot partition root "/" directly holds the kernel and initrd.
-// Rescue entries whose names contain "rescue" are excluded automatically.
-func BootConfig(version, arch string) (vm.BootConfig, error) {
+func BootConfig(version, arch string) (boot.Config, error) {
 	if !ValidMajors[version] {
-		return vm.BootConfig{}, fmt.Errorf("almalinux: no boot config for version %q", version)
+		return boot.Config{}, fmt.Errorf("almalinux: no boot config for version %q", version)
 	}
 	if !ValidArches[arch] {
-		return vm.BootConfig{}, fmt.Errorf("almalinux: unsupported arch %q", arch)
+		return boot.Config{}, fmt.Errorf("almalinux: unsupported arch %q", arch)
 	}
 
-	cfg := vm.BootConfig{
+	cfg := boot.Config{
 		BootDir:    "/",
 		KernelGlob: "vmlinuz-*",
 		InitrdGlob: "initramfs-*.img",

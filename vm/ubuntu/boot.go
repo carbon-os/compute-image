@@ -3,21 +3,10 @@ package ubuntu
 import (
 	"fmt"
 
-	"github.com/carbon-os/compute-image/vm"
+	"github.com/carbon-os/compute-image/vm/boot"
 )
 
-// BootConfig returns the BootConfig for the given Ubuntu version and arch.
-//
-// Partition numbers and boot directories verified from cloud image inspection
-// in May 2026 (notes.txt):
-//
-//	22.04 amd64 → partition 16, /boot   (root filesystem, /boot subdir)
-//	22.04 arm64 → partition 1,  /boot   (root filesystem, /boot subdir)
-//	24.04 *     → partition 16, /       (dedicated boot partition)
-//	25.10 *     → partition 13, /       (dedicated boot partition)
-//	26.04 *     → partition 13, /       (dedicated boot partition)
-func BootConfig(version, arch string) (vm.BootConfig, error) {
-	// Normalize codenames to numeric versions.
+func BootConfig(version, arch string) (boot.Config, error) {
 	switch version {
 	case "jammy":
 		version = "22.04"
@@ -29,7 +18,7 @@ func BootConfig(version, arch string) (vm.BootConfig, error) {
 		version = "26.04"
 	}
 
-	cfg := vm.BootConfig{
+	cfg := boot.Config{
 		KernelGlob: "vmlinuz-*-generic",
 		InitrdGlob: "initrd.img-*-generic",
 	}
